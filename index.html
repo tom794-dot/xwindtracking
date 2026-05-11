@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+<meta name="theme-color" content="#0a1019"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<title>XWindTracking</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet"/>
+<style>
+:root{
+  --ink:#0a1019;--glass:#111c28;--panel:#162030;--rim:#1e3040;
+  --amber:#f5a623;--green:#39e07a;--red:#f05353;--blue:#5bc8f5;
+  --purple:#a78bfa;--white:#e8edf2;--dim:#4a6070;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:var(--ink);color:var(--white);
+  font-family:'Share Tech Mono',monospace;overflow:hidden;touch-action:none}
+
+/* ── LAYOUT ── */
+#app{display:flex;flex-direction:column;height:100%;position:relative}
+#map{flex:1;position:relative;z-index:1}
+
+/* Dark map filter */
+.leaflet-tile{filter:invert(1) hue-rotate(180deg) brightness(0.85) saturate(0.7)}
+.leaflet-container{background:#0a1019}
+
+/* ── HEADER ── */
+header{
+  position:absolute;top:0;left:0;right:0;z-index:1000;
+  background:linear-gradient(180deg,rgba(10,16,25,0.97) 0%,rgba(10,16,25,0.0) 100%);
+  padding:12px 14px 24px;pointer-events:none;
+}
+.hdr-inner{display:flex;align-items:center;gap:10px;pointer-events:all}
+.logo{font-family:'Orbitron',monospace;font-size:14px;font-weight:900;
+  color:var(--amber);letter-spacing:2px}
+.logo span{color:var(--blue)}
+.hdr-sep{flex:1}
+.gps-pill{
+  display:flex;align-items:center;gap:6px;
+  background:rgba(17,28,40,0.9);border:.5px solid var(--rim);
+  border-radius:20px;padding:5px 10px;font-size:10px;
+}
+.gps-dot{width:7px;height:7px;border-radius:50%;background:var(--dim);
+  transition:background .3s}
+.gps-dot.fix{background:var(--green);box-shadow:0 0 6px var(--green)}
+.gps-dot.searching{background:var(--amber);animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ── SEARCH BAR ── */
+#searchBar{
+  position:absolute;top:52px;left:14px;right:14px;z-index:1000;
+  display:flex;gap:8px;pointer-events:all;
+}
+#destInput{
+  flex:1;background:rgba(17,28,40,0.95);border:.5px solid var(--rim);
+  color:var(--amber);font-family:'Orbitron',monospace;font-size:16px;
+  font-weight:700;letter-spacing:5px;text-transform:uppercase;text-align:center;
+  padding:11px 12px;border-radius:8px;outline:none;
+  backdrop-filter:blur(10px);
+  transition:border-color .2s,box-shadow .2s;
+}
+#destInput:focus{border-color:var(--amber);box-shadow:0 0 0 2px rgba(245,166,35,.2)}
+#destInput::placeholder{color:var(--dim);letter-spacing:3px;font-size:12px}
+#goBtn{
+  background:var(--amber);color:var(--ink);border:none;
+  font-family:'Orbitron',monospace;font-weight:900;font-size:11px;
+  letter-spacing:1px;border-radius:8px;cursor:pointer;
+  padding:0 16px;min-width:60px;transition:all .15s;
+}
+#goBtn:active{transform:scale(.95)}
+#goBtn:disabled{opacity:.4}
+
+/* ── HUD OVERLAY ── */
+#hud{
+  position:absolute;bottom:0;left:0;right:0;z-index:1000;
+  background:linear-gradient(0deg,rgba(10,16,25,0.98) 0%,rgba(10,16,25,0.0) 100%);
+  padding:20px 14px 28px;pointer-events:none;
+}
+
+/* Main instrument row */
+.instruments{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px}
+.inst{
+  background:rgba(17,28,40,0.85);border:.5px solid var(--rim);
+  border-radius:8px;padding:8px 6px;text-align:center;
+  backdrop-filter:blur(8px);
+}
+.inst-val{font-family:'Orbitron',monospace;font-size:20px;font-weight:900;
+  line-height:1;margin-bottom:3px}
+.inst-lbl{font-size:8px;color:var(--dim);letter-spacing:1px}
+
+/* Progress bar to destination */
+#progressWrap{
+  background:rgba(17,28,40,0.85);border:.5px solid var(--rim);
+  border-radius:8px;padding:8px 12px;backdrop-filter:blur(8px);
+  display:none;margin-bottom:10px;
+}
+.prog-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.prog-dest{font-family:'Orbitron',monospace;font-size:11px;color:var(--white);font-weight:700}
+.prog-ete{font-size:10px;color:var(--blue)}
+.prog-bar-wrap{height:3px;background:var(--rim);border-radius:2px}
+.prog-bar{height:100%;background:linear-gradient(90deg,var(--amber),var(--green));
+  border-radius:2px;width:0%;transition:width .5s}
+
+/* Wind strip */
+#windStrip{
+  display:flex;gap:6px;align-items:stretch;
+}
+.wind-main{
+  flex:1;background:rgba(17,28,40,0.85);border:.5px solid var(--rim);
+  border-radius:8px;padding:8px 12px;backdrop-filter:blur(8px);
+  display:flex;align-items:center;gap:10px;
+}
+.wind-arrow-wrap{position:relative;width:36px;height:36px;flex-shrink:0}
+.wind-arrow-wrap canvas{position:absolute;inset:0}
+.wind-text{flex:1}
+.wind-metar{font-size:8px;color:var(--dim);margin-top:3px;line-height:1.4;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px}
+.xw-box{
+  background:rgba(17,28,40,0.85);border:.5px solid var(--rim);
+  border-radius:8px;padding:8px 10px;backdrop-filter:blur(8px);
+  text-align:center;min-width:72px;
+}
+.xw-val{font-family:'Orbitron',monospace;font-size:18px;font-weight:900;color:var(--blue)}
+.xw-lbl{font-size:7px;color:var(--dim);letter-spacing:.5px;margin-top:2px}
+.xw-side{font-size:8px;color:var(--dim);margin-top:1px}
+
+/* Status bar */
+#statusBar{
+  position:absolute;top:96px;left:14px;right:14px;z-index:1000;
+  font-size:10px;color:var(--blue);pointer-events:none;
+  text-align:center;text-shadow:0 0 8px rgba(91,200,245,.5);
+}
+#statusBar.err{color:var(--red)}
+
+/* ── COMPASS ROSE on map ── */
+#compassRose{
+  position:absolute;top:108px;right:14px;z-index:999;
+  width:64px;height:64px;pointer-events:none;
+}
+
+/* ── Aircraft marker ── */
+.aircraft-icon{
+  width:32px;height:32px;margin-left:-16px;margin-top:-16px;
+}
+
+/* ── Info panel (slide up) ── */
+#infoPanel{
+  position:absolute;bottom:200px;left:14px;right:14px;z-index:1001;
+  background:rgba(17,28,40,0.97);border:.5px solid var(--rim);
+  border-radius:12px;padding:14px;backdrop-filter:blur(12px);
+  display:none;pointer-events:all;
+  animation:slideUp .25s ease;
+}
+@keyframes slideUp{from{transform:translateY(20px);opacity:0}to{transform:translateY(0);opacity:1}}
+.ip-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.ip-title{font-family:'Orbitron',monospace;font-size:11px;color:var(--amber);font-weight:700}
+.ip-close{background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer;padding:2px 6px}
+.ip-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.ip-cell{padding:8px;background:rgba(255,255,255,.04);border-radius:6px}
+.ip-lbl{font-size:8px;color:var(--dim);letter-spacing:.5px;margin-bottom:3px}
+.ip-val{font-family:'Orbitron',monospace;font-size:14px;font-weight:700}
+
+/* ── Center button ── */
+#centerBtn{
+  position:absolute;bottom:210px;right:14px;z-index:1001;
+  width:44px;height:44px;border-radius:22px;
+  background:rgba(17,28,40,0.95);border:.5px solid var(--rim);
+  color:var(--white);font-size:20px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  backdrop-filter:blur(8px);transition:all .15s;
+}
+#centerBtn:active{transform:scale(.9)}
+#centerBtn.locked{border-color:var(--amber);color:var(--amber)}
+
+/* ── Dest marker popup ── */
+.leaflet-popup-content-wrapper{
+  background:rgba(17,28,40,0.97)!important;
+  border:.5px solid var(--amber)!important;
+  border-radius:8px!important;color:var(--white)!important;
+}
+.leaflet-popup-tip{background:rgba(17,28,40,0.97)!important}
+.leaflet-popup-content{
+  font-family:'Share Tech Mono',monospace!important;
+  font-size:11px!important;margin:8px 12px!important;
+}
+
+/* Spin */
+.spin{display:inline-block;width:10px;height:10px;border:2px solid var(--rim);
+  border-top-color:var(--blue);border-radius:50%;animation:s .8s linear infinite;
+  vertical-align:middle;margin-right:5px}
+@keyframes s{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="map"></div>
+
+  <!-- Header -->
+  <header>
+    <div class="hdr-inner">
+      <div class="logo">XWIND<span>TRACKING</span></div>
+      <div class="hdr-sep"></div>
+      <div class="gps-pill">
+        <div class="gps-dot" id="gpsDot"></div>
+        <span id="gpsLabel">NO GPS</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Search -->
+  <div id="searchBar">
+    <input id="destInput" maxlength="4" placeholder="DEST ICAO"
+      autocomplete="off" autocorrect="off" spellcheck="false"/>
+    <button id="goBtn" onclick="setDestination()">GO</button>
+  </div>
+
+  <!-- Status -->
+  <div id="statusBar"></div>
+
+  <!-- Compass -->
+  <canvas id="compassRose" width="64" height="64"></canvas>
+
+  <!-- Center lock button -->
+  <button id="centerBtn" onclick="toggleCenterLock()" title="Center on aircraft">⊕</button>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div id="progressWrap">
+      <div class="prog-row">
+        <span class="prog-dest" id="progDest">----</span>
+        <span class="prog-ete" id="progETE">--:-- ETE</span>
+      </div>
+      <div class="prog-bar-wrap"><div class="prog-bar" id="progBar"></div></div>
+    </div>
+
+    <div class="instruments">
+      <div class="inst">
+        <div class="inst-val" id="hdgVal" style="color:var(--amber)">---°</div>
+        <div class="inst-lbl">HDG</div>
+      </div>
+      <div class="inst">
+        <div class="inst-val" id="gsVal" style="color:var(--green)">-- KT</div>
+        <div class="inst-lbl">GND SPD</div>
+      </div>
+      <div class="inst">
+        <div class="inst-val" id="altVal" style="color:var(--blue)">---- FT</div>
+        <div class="inst-lbl">ALTITUDE</div>
+      </div>
+      <div class="inst">
+        <div class="inst-val" id="dtgVal" style="color:var(--purple)">-- NM</div>
+        <div class="inst-lbl">DTG</div>
+      </div>
+    </div>
+
+    <div id="windStrip">
+      <div class="wind-main" id="windMain">
+        <div class="wind-arrow-wrap">
+          <canvas id="windArrow" width="36" height="36"></canvas>
+        </div>
+        <div class="wind-text">
+          <div style="font-family:'Orbitron',monospace;font-size:13px;font-weight:700;color:var(--red)" id="windVal">--- / -- KT</div>
+          <div class="wind-metar" id="windMetar">No wind data</div>
+        </div>
+      </div>
+      <div class="xw-box">
+        <div class="xw-val" id="xwVal">--</div>
+        <div class="xw-lbl">X-WIND KT</div>
+        <div class="xw-side" id="xwSide"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Leaflet -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+// ── State ─────────────────────────────────────────────────────────────────────
+const state = {
+  pos:       null,    // {lat, lon, alt, heading, speed, accuracy}
+  dest:      null,    // {icao, lat, lon}
+  wind:      null,    // WindData
+  runways:   [],
+  watching:  false,
+  centerLocked: true,
+  destMarker: null,
+  routeLine:  null,
+  aircraftMarker: null,
+  windFetchTimer: null,
+};
+
+// ── Map init ──────────────────────────────────────────────────────────────────
+const map = L.map('map', {
+  zoomControl: false,
+  attributionControl: true,
+  center: [41.5, -93.6],  // Iowa default
+  zoom: 10,
+});
+
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© <a href="https://www.openstreetmap.org/copyright" style="color:#4a6070">OpenStreetMap</a>',
+  maxZoom: 18,
+}).addTo(map);
+
+// Move attribution to not overlap HUD
+map.attributionControl.setPrefix('');
+
+// Stop center lock when user pans
+map.on('dragstart', () => {
+  state.centerLocked = false;
+  document.getElementById('centerBtn').classList.remove('locked');
+});
+
+// ── Aircraft SVG marker ───────────────────────────────────────────────────────
+function makeAircraftIcon(hdg) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+    <g transform="rotate(${hdg}, 16, 16)">
+      <!-- Aircraft body -->
+      <path d="M16 2 L19 14 L28 18 L28 21 L19 19 L20 26 L23 27 L23 29 L16 27 L9 29 L9 27 L12 26 L13 19 L4 21 L4 18 L13 14 Z"
+        fill="#f5a623" stroke="#111c28" stroke-width="1"/>
+    </g>
+  </svg>`;
+  return L.divIcon({
+    html: svg,
+    className: 'aircraft-icon',
+    iconSize: [32, 32],
+    iconAnchor: [16, 16],
+  });
+}
+
+// ── Destination marker ────────────────────────────────────────────────────────
+function makeDestIcon() {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 40" width="32" height="40">
+    <path d="M16 0 C8 0 2 6 2 14 C2 22 16 40 16 40 C16 40 30 22 30 14 C30 6 24 0 16 0Z"
+      fill="#f05353" stroke="#111c28" stroke-width="1.5"/>
+    <circle cx="16" cy="14" r="6" fill="#111c28"/>
+    <text x="16" y="18" text-anchor="middle" fill="#f5a623"
+      font-family="Orbitron,monospace" font-size="8" font-weight="700">✈</text>
+  </svg>`;
+  return L.divIcon({
+    html: svg,
+    className: '',
+    iconSize: [32, 40],
+    iconAnchor: [16, 40],
+    popupAnchor: [0, -40],
+  });
+}
+
+// ── GPS ───────────────────────────────────────────────────────────────────────
+function startGPS() {
+  if (!navigator.geolocation) {
+    setStatus('GPS not supported on this device', true);
+    return;
+  }
+  setStatus('<span class="spin"></span>Acquiring GPS…', false);
+  document.getElementById('gpsDot').className = 'gps-dot searching';
+  document.getElementById('gpsLabel').textContent = 'SEARCHING';
+
+  const opts = {
+    enableHighAccuracy: true,
+    maximumAge: 2000,
+    timeout: 15000,
+  };
+
+  state.watching = navigator.geolocation.watchPosition(onGPSSuccess, onGPSError, opts);
+}
+
+function onGPSSuccess(pos) {
+  const c = pos.coords;
+  state.pos = {
+    lat:      c.latitude,
+    lon:      c.longitude,
+    alt:      c.altitude ? c.altitude * 3.28084 : null,  // metres→feet
+    heading:  c.heading  || 0,
+    speed:    c.speed    ? c.speed * 1.944   : 0,        // m/s→knots
+    accuracy: c.accuracy,
+  };
+
+  document.getElementById('gpsDot').className = 'gps-dot fix';
+  document.getElementById('gpsLabel').textContent = 'GPS FIX';
+  if (!state.dest) setStatus('', false);
+
+  updateAircraftMarker();
+  updateHUD();
+  if (state.centerLocked) centerOnAircraft();
+  drawCompass();
+}
+
+function onGPSError(err) {
+  document.getElementById('gpsDot').className = 'gps-dot';
+  document.getElementById('gpsLabel').textContent = 'NO GPS';
+  const msgs = {1:'GPS denied — check permissions',2:'GPS unavailable',3:'GPS timeout'};
+  setStatus(msgs[err.code] || 'GPS error', true);
+}
+
+function updateAircraftMarker() {
+  if (!state.pos) return;
+  const ll = [state.pos.lat, state.pos.lon];
+  const hdg = state.pos.heading || 0;
+  if (!state.aircraftMarker) {
+    state.aircraftMarker = L.marker(ll, {icon: makeAircraftIcon(hdg), zIndexOffset: 1000}).addTo(map);
+  } else {
+    state.aircraftMarker.setLatLng(ll);
+    state.aircraftMarker.setIcon(makeAircraftIcon(hdg));
+  }
+
+  // Update route line
+  if (state.dest) {
+    const destLL = [state.dest.lat, state.dest.lon];
+    if (!state.routeLine) {
+      state.routeLine = L.polyline([ll, destLL], {
+        color: 'rgba(245,166,35,0.6)',
+        weight: 2,
+        dashArray: '8 6',
+      }).addTo(map);
+    } else {
+      state.routeLine.setLatLngs([ll, destLL]);
+    }
+  }
+}
+
+function centerOnAircraft() {
+  if (!state.pos) return;
+  map.setView([state.pos.lat, state.pos.lon], map.getZoom(), {animate: true, duration: 0.5});
+}
+
+function toggleCenterLock() {
+  state.centerLocked = !state.centerLocked;
+  document.getElementById('centerBtn').classList.toggle('locked', state.centerLocked);
+  if (state.centerLocked && state.pos) centerOnAircraft();
+}
+
+// ── HUD update ────────────────────────────────────────────────────────────────
+function updateHUD() {
+  const p = state.pos;
+  if (!p) return;
+
+  // Heading
+  document.getElementById('hdgVal').textContent =
+    p.heading != null ? Math.round(p.heading) + '°' : '---°';
+
+  // Ground speed
+  document.getElementById('gsVal').textContent =
+    p.speed ? Math.round(p.speed) + ' KT' : '-- KT';
+
+  // Altitude
+  document.getElementById('altVal').textContent =
+    p.alt != null ? Math.round(p.alt) + ' FT' : '---- FT';
+
+  // Distance to destination
+  if (state.dest) {
+    const dtgNm = haversineNm(p.lat, p.lon, state.dest.lat, state.dest.lon);
+    document.getElementById('dtgVal').textContent = dtgNm.toFixed(1) + ' NM';
+
+    // ETE
+    if (p.speed > 2) {
+      const eteMin = (dtgNm / p.speed) * 60;
+      const h = Math.floor(eteMin / 60);
+      const m = Math.round(eteMin % 60);
+      document.getElementById('progETE').textContent =
+        (h > 0 ? h + 'h ' : '') + m + 'm ETE';
+    } else {
+      document.getElementById('progETE').textContent = '--:-- ETE';
+    }
+
+    // Progress bar — based on original distance vs current
+    if (state.dest.origDist) {
+      const pct = Math.max(0, Math.min(100, (1 - dtgNm / state.dest.origDist) * 100));
+      document.getElementById('progBar').style.width = pct + '%';
+    }
+
+    // Crosswind for active destination
+    if (state.wind && state.runways.length) {
+      updateCrosswind();
+    }
+  } else {
+    document.getElementById('dtgVal').textContent = '-- NM';
+  }
+
+  // Update wind crosswind with current heading
+  if (state.wind) updateWindDisplay();
+}
+
+// ── Crosswind calc ────────────────────────────────────────────────────────────
+function updateCrosswind() {
+  if (!state.wind || !state.runways.length) return;
+  const w = state.wind;
+  if (w.calm || w.variable || w.spd === 0) {
+    document.getElementById('xwVal').textContent = '--';
+    document.getElementById('xwSide').textContent = '';
+    return;
+  }
+
+  // Find best runway
+  let bestRwy = null, bestHw = -Infinity;
+  state.runways.forEach(rwy => {
+    const leMag = identToMag(rwy.leId);
+    const heMag = identToMag(rwy.heId);
+    const cwLE = calcCW(w, leMag), cwHE = calcCW(w, heMag);
+    const best = cwLE.hw >= cwHE.hw ? cwLE : cwHE;
+    if (best.hw > bestHw) { bestHw = best.hw; bestRwy = best; }
+  });
+
+  if (bestRwy) {
+    const xa = Math.abs(Math.round(bestRwy.xw));
+    document.getElementById('xwVal').textContent = xa;
+    document.getElementById('xwSide').textContent =
+      bestRwy.xw > 0.5 ? 'L' : bestRwy.xw < -0.5 ? 'R' : '—';
+    document.getElementById('xwVal').style.color =
+      xa >= 20 ? 'var(--red)' : xa >= 10 ? 'var(--amber)' : 'var(--blue)';
+  }
+}
+
+function calcCW(wind, rwyMag) {
+  const a = (wind.dir - rwyMag) * Math.PI / 180;
+  return {hw: wind.spd * Math.cos(a), xw: wind.spd * Math.sin(a)};
+}
+
+function identToMag(ident) {
+  const n = parseInt((ident || '').replace(/[LRClrc]/g, ''));
+  if (!n) return 0;
+  return n === 36 ? 360 : n * 10;
+}
+
+// ── Wind display ──────────────────────────────────────────────────────────────
+function updateWindDisplay() {
+  const w = state.wind;
+  if (!w) return;
+
+  const dirStr = w.calm ? 'CALM' : w.variable ? 'VRB' : String(w.dir).padStart(3, '0') + '°';
+  const spdStr = w.calm ? '' : `/ ${w.spd}${w.gust ? 'G' + w.gust : ''} KT`;
+  document.getElementById('windVal').textContent = dirStr + ' ' + spdStr;
+  document.getElementById('windMetar').textContent = w.raw || '';
+
+  drawWindArrow(w);
+}
+
+function drawWindArrow(wind) {
+  const cvs = document.getElementById('windArrow');
+  const ctx = cvs.getContext('2d');
+  const cx = 18, cy = 18, R = 14;
+  ctx.clearRect(0, 0, 36, 36);
+
+  // Circle
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.strokeStyle = 'rgba(38,53,72,0.8)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  if (wind.calm || wind.variable || !wind.dir) {
+    ctx.font = '9px Share Tech Mono';
+    ctx.fillStyle = '#4a6070';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(wind.variable ? 'VRB' : 'CALM', cx, cy);
+    return;
+  }
+
+  // Wind FROM direction arrow
+  const ang = (wind.dir - 90) * Math.PI / 180;
+  const fromX = cx + Math.cos(ang) * R * 0.85;
+  const fromY = cy + Math.sin(ang) * R * 0.85;
+  const toAng = ang + Math.PI;
+  const toX = cx + Math.cos(toAng) * R * 0.4;
+  const toY = cy + Math.sin(toAng) * R * 0.4;
+
+  ctx.beginPath();
+  ctx.moveTo(fromX, fromY);
+  ctx.lineTo(toX, toY);
+  ctx.strokeStyle = 'rgba(240,83,83,0.9)';
+  ctx.lineWidth = 2;
+  ctx.lineCap = 'round';
+  ctx.stroke();
+
+  // Arrowhead
+  const hL = 6, hA = 0.5;
+  ctx.beginPath();
+  ctx.moveTo(toX, toY);
+  ctx.lineTo(toX - hL * Math.cos(toAng - hA), toY - hL * Math.sin(toAng - hA));
+  ctx.lineTo(toX - hL * Math.cos(toAng + hA), toY - hL * Math.sin(toAng + hA));
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(240,83,83,0.9)';
+  ctx.fill();
+}
+
+// ── Compass rose ──────────────────────────────────────────────────────────────
+function drawCompass() {
+  const cvs = document.getElementById('compassRose');
+  const ctx = cvs.getContext('2d');
+  const cx = 32, cy = 32, R = 28;
+  ctx.clearRect(0, 0, 64, 64);
+
+  // Background
+  ctx.beginPath();
+  ctx.arc(cx, cy, R, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(17,28,40,0.85)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(38,53,72,0.8)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // Rotate based on heading
+  const hdg = state.pos?.heading || 0;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(-hdg * Math.PI / 180);
+
+  // Cardinal labels
+  [['N', 0, '#f5a623'], ['E', 90, '#4a6070'], ['S', 180, '#4a6070'], ['W', 270, '#4a6070']].forEach(([l, d, col]) => {
+    const a = (d - 90) * Math.PI / 180;
+    ctx.font = 'bold 8px Orbitron,monospace';
+    ctx.fillStyle = col;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(l, Math.cos(a) * R * 0.68, Math.sin(a) * R * 0.68);
+  });
+
+  // Tick marks
+  for (let i = 0; i < 36; i++) {
+    const a = (i * 10 - 90) * Math.PI / 180;
+    const inner = R * (i % 9 === 0 ? 0.75 : i % 3 === 0 ? 0.82 : 0.88);
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * inner, Math.sin(a) * inner);
+    ctx.lineTo(Math.cos(a) * R * 0.97, Math.sin(a) * R * 0.97);
+    ctx.strokeStyle = `rgba(74,96,112,${i % 9 === 0 ? 0.8 : i % 3 === 0 ? 0.5 : 0.3})`;
+    ctx.lineWidth = i % 9 === 0 ? 1.5 : 0.8;
+    ctx.stroke();
+  }
+
+  ctx.restore();
+
+  // Fixed heading indicator (triangle at top)
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - R + 1);
+  ctx.lineTo(cx - 4, cy - R + 8);
+  ctx.lineTo(cx + 4, cy - R + 8);
+  ctx.closePath();
+  ctx.fillStyle = '#f5a623';
+  ctx.fill();
+}
+
+// ── Set destination ───────────────────────────────────────────────────────────
+async function setDestination() {
+  const raw = document.getElementById('destInput').value.trim().toUpperCase();
+  if (raw.length < 3) return;
+  const icao = raw.length === 3 ? 'K' + raw : raw;
+
+  document.getElementById('goBtn').disabled = true;
+  setStatus('<span class="spin"></span>Looking up ' + icao + '…', false);
+
+  try {
+    // Get airport coordinates from OurAirports
+    const coords = await fetchAirportCoords(icao);
+    if (!coords) throw new Error('Airport not found: ' + icao);
+
+    // Set destination
+    state.dest = {
+      icao,
+      lat: coords.lat,
+      lon: coords.lon,
+      origDist: state.pos ? haversineNm(state.pos.lat, state.pos.lon, coords.lat, coords.lon) : null,
+    };
+
+    // Place destination marker
+    if (state.destMarker) map.removeLayer(state.destMarker);
+    state.destMarker = L.marker([coords.lat, coords.lon], {icon: makeDestIcon()})
+      .bindPopup(`<b style="color:#f5a623;font-family:Orbitron,monospace">${icao}</b><br>${coords.name || ''}`)
+      .addTo(map);
+
+    // Show progress bar
+    document.getElementById('progressWrap').style.display = 'block';
+    document.getElementById('progDest').textContent = icao;
+
+    // Fit map to show both points
+    if (state.pos) {
+      map.fitBounds([
+        [state.pos.lat, state.pos.lon],
+        [coords.lat, coords.lon],
+      ], {padding: [80, 80]});
+      state.centerLocked = false;
+    } else {
+      map.setView([coords.lat, coords.lon], 10);
+    }
+
+    // Fetch runways and wind
+    setStatus('<span class="spin"></span>Fetching wind for ' + icao + '…', false);
+    const [runways, wind] = await Promise.allSettled([
+      fetchRunways(icao),
+      fetchWind(icao),
+    ]);
+
+    state.runways = runways.status === 'fulfilled' ? runways.value : [];
+    state.wind    = wind.status   === 'fulfilled' ? wind.value    : null;
+
+    updateWindDisplay();
+    updateHUD();
+
+    const windStr = state.wind
+      ? (state.wind.calm ? 'CALM' : `${String(state.wind.dir).padStart(3,'0')}° / ${state.wind.spd}KT`)
+      : 'Wind unavailable';
+    setStatus(`✓ ${icao} · ${windStr}`, false);
+
+    // Start periodic wind refresh every 30 min
+    clearInterval(state.windFetchTimer);
+    state.windFetchTimer = setInterval(() => refreshWind(icao), 30 * 60 * 1000);
+
+  } catch(e) {
+    setStatus('✗ ' + e.message, true);
+  }
+  document.getElementById('goBtn').disabled = false;
+}
+
+// ── Airport coordinates lookup ────────────────────────────────────────────────
+// Built-in DB for common airports for instant load
+const AIRPORTS = {
+  'KATL':{lat:33.6407,lon:-84.4277,name:'Hartsfield-Jackson Atlanta'},
+  'KORD':{lat:41.9742,lon:-87.9073,name:'Chicago O\'Hare'},
+  'KLAX':{lat:33.9425,lon:-118.408,name:'Los Angeles Intl'},
+  'KJFK':{lat:40.6413,lon:-73.7781,name:'John F. Kennedy'},
+  'KDEN':{lat:39.8561,lon:-104.674,name:'Denver Intl'},
+  'KSFO':{lat:37.6213,lon:-122.379,name:'San Francisco Intl'},
+  'KBOS':{lat:42.3656,lon:-71.0096,name:'Boston Logan'},
+  'KMCI':{lat:39.2976,lon:-94.7139,name:'Kansas City Intl'},
+  'KDSM':{lat:41.5340,lon:-93.6631,name:'Des Moines Intl'},
+  'KOTM':{lat:41.1072,lon:-92.4472,name:'Ottumwa Regional'},
+  'KPEA':{lat:40.7478,lon:-91.6764,name:'Pella Municipal'},
+  'KMDW':{lat:41.7860,lon:-87.7524,name:'Chicago Midway'},
+  'KIAH':{lat:29.9902,lon:-95.3368,name:'Houston Intercontinental'},
+  'KDFW':{lat:32.8998,lon:-97.0403,name:'Dallas Fort Worth'},
+  'KLAS':{lat:36.0840,lon:-115.152,name:'Harry Reid Intl'},
+  'KSEA':{lat:47.4502,lon:-122.309,name:'Seattle-Tacoma'},
+  'KMSP':{lat:44.8820,lon:-93.2218,name:'Minneapolis-St. Paul'},
+  'KPHX':{lat:33.4373,lon:-112.008,name:'Phoenix Sky Harbor'},
+  'KDTW':{lat:42.2124,lon:-83.3534,name:'Detroit Metro'},
+  'KCLT':{lat:35.2140,lon:-80.9431,name:'Charlotte Douglas'},
+  'KBWI':{lat:39.1754,lon:-76.6683,name:'Baltimore Washington'},
+  'KDCA':{lat:38.8521,lon:-77.0377,name:'Ronald Reagan Washington'},
+  'KSLC':{lat:40.7884,lon:-111.978,name:'Salt Lake City Intl'},
+  'KMCO':{lat:28.4294,lon:-81.3089,name:'Orlando Intl'},
+  'KPHL':{lat:39.8719,lon:-75.2411,name:'Philadelphia Intl'},
+  'KTPA':{lat:27.9755,lon:-82.5332,name:'Tampa Intl'},
+  'KFLL':{lat:26.0726,lon:-80.1527,name:'Fort Lauderdale'},
+  'KBNA':{lat:36.1245,lon:-86.6782,name:'Nashville Intl'},
+  'KAUS':{lat:30.1945,lon:-97.6699,name:'Austin-Bergstrom'},
+  'KSAN':{lat:32.7336,lon:-117.190,name:'San Diego Intl'},
+  'KPDX':{lat:45.5887,lon:-122.597,name:'Portland Intl'},
+  'KOAK':{lat:37.7213,lon:-122.221,name:'Oakland Intl'},
+  'KSJC':{lat:37.3626,lon:-121.929,name:'San Jose Intl'},
+  'PANC':{lat:61.1744,lon:-149.996,name:'Ted Stevens Anchorage'},
+  'KHNL':{lat:21.3187,lon:-157.922,name:'Daniel K. Inouye'},
+  'KBUF':{lat:42.9405,lon:-78.7322,name:'Buffalo Niagara'},
+  'KIND':{lat:39.7173,lon:-86.2944,name:'Indianapolis Intl'},
+  'KCMH':{lat:39.9980,lon:-82.8919,name:'Columbus'},
+  'KCLE':{lat:41.4117,lon:-81.8498,name:'Cleveland Hopkins'},
+  'KPIT':{lat:40.4915,lon:-80.2329,name:'Pittsburgh Intl'},
+};
+
+async function fetchAirportCoords(icao) {
+  if (AIRPORTS[icao]) return AIRPORTS[icao];
+
+  // Try OurAirports via proxy
+  try {
+    const enc = encodeURIComponent(`https://ourairports.com/airports/${icao}/pilot_info.html`);
+    const r = await tFetch(`https://api.allorigins.win/get?url=${enc}`, 10000);
+    if (r.ok) {
+      const j = await r.json();
+      const html = j.contents || '';
+      const latM = html.match(/Latitude:\s*<[^>]+>([\d.\-]+)/);
+      const lonM = html.match(/Longitude:\s*<[^>]+>([\d.\-]+)/);
+      const nameM = html.match(/<title>([^<]+)<\/title>/);
+      if (latM && lonM) {
+        return {
+          lat: parseFloat(latM[1]),
+          lon: parseFloat(lonM[1]),
+          name: nameM ? nameM[1].split(' - ')[0] : icao,
+        };
+      }
+    }
+  } catch(_) {}
+
+  // Try airport-data.com API
+  try {
+    const enc = encodeURIComponent(`https://airport-data.com/api/ap_info.json?icao=${icao}`);
+    const r = await tFetch(`https://api.allorigins.win/get?url=${enc}`, 10000);
+    if (r.ok) {
+      const j = await r.json();
+      const data = JSON.parse(j.contents || '{}');
+      if (data.latitude && data.longitude) {
+        return {lat: parseFloat(data.latitude), lon: parseFloat(data.longitude), name: data.name || icao};
+      }
+    }
+  } catch(_) {}
+
+  return null;
+}
+
+// ── Wind fetch (via proxy) ────────────────────────────────────────────────────
+async function refreshWind(icao) {
+  try {
+    const wind = await fetchWind(icao);
+    state.wind = wind;
+    updateWindDisplay();
+    updateHUD();
+  } catch(_) {}
+}
+
+const proxy  = url => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`;
+const proxy2 = url => `https://corsproxy.io/?${encodeURIComponent(url)}`;
+
+async function proxyGet(url) {
+  try {
+    const r = await tFetch(proxy(url), 12000);
+    if (r.ok) { const j = await r.json(); if (j.contents) return j.contents; }
+  } catch(_) {}
+  try {
+    const r = await tFetch(proxy2(url), 12000);
+    if (r.ok) { const t = await r.text(); if (t) return t; }
+  } catch(_) {}
+  return null;
+}
+
+async function fetchWind(icao) {
+  // Strategy 1: AWC JSON
+  try {
+    const body = await proxyGet(`https://aviationweather.gov/api/data/metar?ids=${icao}&format=json&taf=false`);
+    if (body) {
+      const data = JSON.parse(body);
+      if (Array.isArray(data) && data.length) {
+        const m = data[0];
+        const variable = String(m.wdir).toUpperCase() === 'VRB';
+        const spd = parseInt(m.wspd) || 0;
+        return {dir: variable?0:parseInt(m.wdir)||0, spd, gust: m.wgst?parseInt(m.wgst):null,
+          variable, calm: spd===0&&!variable, raw: m.rawOb||'', name: m.name||'', fcat: m.flightCategory||''};
+      }
+    }
+  } catch(_) {}
+
+  // Strategy 2: AWC raw
+  try {
+    const body = await proxyGet(`https://aviationweather.gov/api/data/metar?ids=${icao}&format=raw`);
+    if (body && body.includes('KT')) return parseMetarRaw(body);
+  } catch(_) {}
+
+  // Strategy 3: TGFTP
+  try {
+    const body = await proxyGet(`https://tgftp.nws.noaa.gov/data/observations/metar/stations/${icao}.TXT`);
+    if (body && body.includes('KT')) return parseMetarRaw(body);
+  } catch(_) {}
+
+  throw new Error('Wind unavailable for ' + icao);
+}
+
+function parseMetarRaw(raw) {
+  const line = raw.split('\n').find(l => /\d{5}(G\d{2,3})?KT/.test(l) || l.includes('VRB')) || raw;
+  if (/\b00000KT\b/.test(line)) return {dir:0,spd:0,gust:null,variable:false,calm:true,raw:line.trim(),name:'',fcat:''};
+  const m = line.match(/(VRB|\d{3})(\d{2,3})(?:G(\d{2,3}))?KT/);
+  if (!m) return {dir:0,spd:0,gust:null,variable:false,calm:true,raw:line.trim(),name:'',fcat:''};
+  const variable = m[1]==='VRB';
+  const spd = parseInt(m[2]);
+  return {dir:variable?0:parseInt(m[1]),spd,gust:m[3]?parseInt(m[3]):null,
+    variable,calm:spd===0&&!variable,raw:line.trim(),name:'',fcat:''};
+}
+
+// ── Runway fetch ──────────────────────────────────────────────────────────────
+const RUNWAY_DB = {
+  'KATL':[{leId:'08L',heId:'26R',leH:80.3,heH:260.3},{leId:'09L',heId:'27R',leH:90.3,heH:270.3},{leId:'10',heId:'28',leH:100.4,heH:280.4}],
+  'KORD':[{leId:'04L',heId:'22R',leH:40.3,heH:220.3},{leId:'09L',heId:'27R',leH:90.3,heH:270.3},{leId:'10L',heId:'28R',leH:100.5,heH:280.5}],
+  'KLAX':[{leId:'06L',heId:'24R',leH:60.2,heH:240.2},{leId:'07L',heId:'25R',leH:70.1,heH:250.1}],
+  'KJFK':[{leId:'04L',heId:'22R',leH:40.5,heH:220.5},{leId:'13L',heId:'31R',leH:130.8,heH:310.8}],
+  'KDEN':[{leId:'07',heId:'25',leH:70.1,heH:250.1},{leId:'16L',heId:'34R',leH:163.8,heH:343.8},{leId:'17L',heId:'35R',leH:173.9,heH:353.9}],
+  'KDSM':[{leId:'05',heId:'23',leH:50.0,heH:230.0},{leId:'13',heId:'31',leH:130.0,heH:310.0},{leId:'18',heId:'36',leH:178.0,heH:358.0}],
+  'KOTM':[{leId:'04',heId:'22',leH:36.0,heH:216.0},{leId:'13',heId:'31',leH:128.0,heH:308.0}],
+  'KPEA':[{leId:'16',heId:'34',leH:163.0,heH:343.0}],
+  'KMCI':[{leId:'01L',heId:'19R',leH:10.0,heH:190.0},{leId:'01R',heId:'19L',leH:10.0,heH:190.0}],
+  'KMDW':[{leId:'04L',heId:'22R',leH:40.2,heH:220.2},{leId:'13L',heId:'31R',leH:130.5,heH:310.5}],
+};
+
+async function fetchRunways(icao) {
+  if (RUNWAY_DB[icao]) return RUNWAY_DB[icao];
+
+  try {
+    const faaUrl = `https://services6.arcgis.com/ssFJjBXIUyZDrSYZ/ArcGIS/rest/services/AM_Runway/FeatureServer/0/query?where=ICAO_ID='${icao}'&outFields=DESIGNATOR,SURFACE,RWY_OPER&returnGeometry=true&f=json`;
+    const enc = encodeURIComponent(faaUrl);
+    const r = await tFetch(`https://api.allorigins.win/get?url=${enc}`, 15000);
+    if (r.ok) {
+      const j = await r.json();
+      const data = JSON.parse(j.contents || '{}');
+      const features = data.features || [];
+      const rws = [];
+      features.forEach(f => {
+        const attrs = f.attributes || {};
+        const geo = f.geometry;
+        const des = (attrs.DESIGNATOR||'').trim();
+        if (!des.includes('/')) return;
+        const [leId, heId] = des.split('/').map(s=>s.trim());
+        let leH=0, heH=0;
+        if (geo?.rings?.length) {
+          const ring = geo.rings[0].map(p=>[p[0],p[1]]);
+          [leH,heH] = headingFromPolygon(ring, des);
+        }
+        rws.push({leId,heId,leH,heH});
+      });
+      if (rws.length) return rws;
+    }
+  } catch(_) {}
+
+  try {
+    const enc = encodeURIComponent(`https://ourairports.com/airports/${icao}/runways.csv`);
+    const r = await tFetch(`https://api.allorigins.win/get?url=${enc}`, 10000);
+    if (r.ok) {
+      const j = await r.json();
+      return parseCsvRunways(j.contents||'', icao);
+    }
+  } catch(_) {}
+
+  return [];
+}
+
+function headingFromPolygon(ring, designator) {
+  const pts = (ring.length>1&&ring[0][0]===ring[ring.length-1][0])?ring.slice(0,-1):ring;
+  let maxLen=0, best=0;
+  for(let i=0;i<pts.length;i++){
+    const [lon1,lat1]=pts[i],[lon2,lat2]=pts[(i+1)%pts.length];
+    const lm=(lat1+lat2)/2*Math.PI/180;
+    const dx=(lon2-lon1)*Math.cos(lm)*111319, dy=(lat2-lat1)*111319;
+    const el=Math.sqrt(dx*dx+dy*dy);
+    if(el>maxLen){maxLen=el;best=(Math.atan2(dx,dy)*180/Math.PI+360)%360;}
+  }
+  const opp=(best+180)%360;
+  const le=parseInt((designator.split('/')[0]||'').replace(/[LRClrc]/g,''))||0;
+  const lm=(le%37)*10;
+  const d1=Math.abs(((best-lm)+540)%360-180);
+  return d1<=Math.abs(((opp-lm)+540)%360-180)?[best,opp]:[opp,best];
+}
+
+function parseCsvRunways(csv,icao){
+  const lines=csv.trim().split('\n').filter(l=>l.trim());
+  if(lines.length<2)return[];
+  const hdr=lines[0].split(',').map(h=>h.replace(/"/g,'').trim());
+  const col=n=>hdr.indexOf(n);
+  const iApt=col('airport_ident'),iLeId=col('le_ident'),iHeId=col('he_ident');
+  const iLeH=col('le_heading_degT'),iHeH=col('he_heading_degT'),iClosed=col('closed');
+  const res=[];
+  for(let i=1;i<lines.length;i++){
+    const c=parseCsvLine(lines[i]);
+    const g=k=>k<0||k>=c.length?'':c[k].replace(/"/g,'').trim();
+    if(iApt>=0&&g(iApt).toUpperCase()!==icao.toUpperCase())continue;
+    if(g(iClosed)==='1')continue;
+    const leId=g(iLeId);
+    const leH=parseFloat(g(iLeH)),heH=parseFloat(g(iHeH));
+    if(!leId||isNaN(leH)||isNaN(heH))continue;
+    res.push({leId,heId:g(iHeId),leH,heH});
+  }
+  return res;
+}
+
+function parseCsvLine(line){
+  const r=[];let cur='',inQ=false;
+  for(const c of line){if(c==='"')inQ=!inQ;else if(c===','&&!inQ){r.push(cur);cur='';}else cur+=c;}
+  r.push(cur);return r;
+}
+
+// ── Utility ───────────────────────────────────────────────────────────────────
+function haversineNm(lat1,lon1,lat2,lon2){
+  const R=3440.065, dLat=(lat2-lat1)*Math.PI/180, dLon=(lon2-lon1)*Math.PI/180;
+  const a=Math.sin(dLat/2)**2+Math.cos(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.sin(dLon/2)**2;
+  return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+}
+
+function tFetch(url,ms=10000){
+  const ctrl=new AbortController();
+  setTimeout(()=>ctrl.abort(),ms);
+  return fetch(url,{signal:ctrl.signal});
+}
+
+function setStatus(html,err){
+  const el=document.getElementById('statusBar');
+  el.innerHTML=html;
+  el.className=err?'err':'';
+}
+
+// ── Enter key for search ──────────────────────────────────────────────────────
+document.getElementById('destInput').addEventListener('keydown',e=>{
+  if(e.key==='Enter')setDestination();
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+drawCompass();
+setInterval(drawCompass, 500);   // Refresh compass
+startGPS();
+</script>
+</body>
+</html>
